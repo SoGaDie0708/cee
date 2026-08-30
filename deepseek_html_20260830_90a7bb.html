@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>象棋卡牌對戰 · 聯機</title>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    <style>
+        * { box-sizing: border-box; user-select: none; -webkit-tap-highlight-color: transparent; }
+        body { margin: 0; min-height: 100vh; background: #2d2416; display: flex; justify-content: center; align-items: center; font-family: 'Segoe UI','Microsoft YaHei',sans-serif; padding: 10px; }
+        .game-container { background: #d4a05a; border-radius: 32px; padding: 16px 20px 20px; box-shadow: 0 20px 40px rgba(0,0,0,0.7), inset 0 2px 4px rgba(255,215,140,0.3); border: 6px solid #b8893c; max-width: 720px; width: 100%; display: flex; flex-direction: column; align-items: center; }
+        .header { width: 100%; display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; color: #f7e8c8; font-weight: bold; font-size: 18px; text-shadow: 2px 2px 0 #6b4a2a; padding: 0 4px; flex-wrap: wrap; gap: 4px; }
+        .header .turn-indicator { background: #3d2b18; padding: 4px 18px; border-radius: 20px; border: 1px solid #a77a44; font-size: 16px; }
+        .header .turn-indicator .red { color: #e74c3c; }
+        .header .turn-indicator .black { color: #ccc; }
+        .header .status-msg { background: #3d2b18; padding: 4px 16px; border-radius: 20px; font-size: 14px; }
+        .header .btn-group { display: flex; gap: 6px; flex-wrap: wrap; }
+        .header .btn-group button { background: #6b4a2a; border: none; color: #f0dfc0; padding: 4px 12px; border-radius: 16px; font-size: 13px; font-weight: 600; cursor: pointer; box-shadow: 0 2px 0 #3d2b18; border: 1px solid #a77a44; transition: 0.1s; }
+        .header .btn-group button:active { transform: translateY(2px); box-shadow: 0 0px 0 #3d2b18; }
+        .header .btn-group button:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+        .card-zone { width: 100%; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; padding: 6px 4px; min-height: 70px; background: rgba(60,40,20,0.4); border-radius: 16px; border: 2px solid #7a5a30; margin: 4px 0; position: relative; }
+        .card-zone .zone-label { position: absolute; top: -12px; left: 12px; background: #3d2b18; color: #f0dfc0; font-size: 12px; padding: 0 12px; border-radius: 10px; border: 1px solid #a77a44; font-weight: bold; }
+        .card-item { background: linear-gradient(145deg, #f7efd0, #e8dbb0); border-radius: 12px; padding: 6px 12px; font-size: 14px; font-weight: 600; color: #2d1a0a; border: 2px solid #b8893c; box-shadow: 0 3px 0 #6b4a2a; cursor: pointer; transition: all 0.1s; position: relative; min-width: 70px; text-align: center; flex: 0 1 auto; display: flex; flex-direction: column; align-items: center; line-height: 1.3; }
+        .card-item .card-name { font-size: 15px; font-weight: 700; }
+        .card-item .card-desc { font-size: 11px; font-weight: normal; color: #5a3a1a; opacity: 0.7; display: none; }
+        .card-item.active .card-desc { display: block; }
+        .card-item.disabled { opacity: 0.4; cursor: not-allowed; filter: grayscale(0.5); pointer-events: none; }
+        .card-item:active:not(.disabled) { transform: scale(0.95); box-shadow: 0 1px 0 #6b4a2a; }
+        .card-item .long-press-hint { font-size: 9px; color: #8a6a3a; margin-top: 2px; }
+        .canvas-wrap { width: 100%; aspect-ratio: 1 / 1.1; background: #b8893c; border-radius: 16px; padding: 6px; box-shadow: inset 0 0 20px rgba(0,0,0,0.3); border: 4px solid #8a6a3a; margin: 6px 0; }
+        canvas { width: 100%; height: 100%; display: block; border-radius: 10px; background: #f0dbb0; cursor: pointer; touch-action: none; }
+        .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); z-index: 999; justify-content: center; align-items: center; }
+        .modal-overlay.show { display: flex; }
+        .modal-box { background: #e8dbb0; border-radius: 28px; padding: 24px 28px; max-width: 420px; width: 90%; border: 6px solid #b8893c; box-shadow: 0 30px 60px rgba(0,0,0,0.8); color: #2d1a0a; max-height: 80vh; overflow-y: auto; }
+        .modal-box h2 { text-align: center; margin-top: 0; color: #4a2a10; border-bottom: 2px solid #a77a44; padding-bottom: 10px; font-size: 22px; }
+        .modal-box .modal-desc { font-size: 16px; text-align: center; margin: 12px 0; white-space: pre-wrap; }
+        .modal-box .target-grid { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin: 12px 0; }
+        .modal-box .target-grid button { background: #6b4a2a; color: #f0dfc0; border: none; padding: 8px 18px; border-radius: 20px; font-size: 15px; font-weight: 600; cursor: pointer; box-shadow: 0 3px 0 #3d2b18; transition: 0.1s; border: 1px solid #a77a44; flex: 0 1 auto; min-width: 60px; }
+        .modal-box .target-grid button:active { transform: translateY(3px); box-shadow: 0 0px 0 #3d2b18; }
+        .modal-box .row { display: flex; justify-content: center; gap: 12px; margin-top: 16px; flex-wrap: wrap; }
+        .modal-box .row button { background: #6b4a2a; color: #f0dfc0; border: none; padding: 8px 28px; border-radius: 24px; font-size: 15px; font-weight: 600; cursor: pointer; box-shadow: 0 3px 0 #3d2b18; border: 1px solid #a77a44; transition: 0.1s; }
+        .modal-box .row button:active { transform: translateY(3px); box-shadow: 0 0px 0 #3d2b18; }
+        .modal-box .row button.primary { background: #b8893c; color: #2d1a0a; border-color: #dab06a; }
+        .toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: #2d1a0a; color: #f0dfc0; padding: 12px 30px; border-radius: 30px; border: 2px solid #b8893c; font-weight: bold; font-size: 16px; z-index: 1000; opacity: 0; transition: opacity 0.4s; pointer-events: none; box-shadow: 0 10px 30px rgba(0,0,0,0.6); }
+        .toast.show { opacity: 1; }
+        .lobby { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 20px 0; width: 100%; }
+        .lobby input { padding: 10px 16px; border-radius: 24px; border: 2px solid #7a5a30; font-size: 18px; width: 200px; text-align: center; background: #f7efd0; }
+        .lobby button { background: #6b4a2a; color: #f0dfc0; border: none; padding: 10px 32px; border-radius: 30px; font-size: 18px; font-weight: bold; cursor: pointer; box-shadow: 0 4px 0 #3d2b18; border: 1px solid #a77a44; transition: 0.1s; }
+        .lobby button:active { transform: translateY(4px); box-shadow: 0 0px 0 #3d2b18; }
+        .lobby .room-id { font-size: 28px; font-weight: bold; background: #3d2b18; padding: 8px 24px; border-radius: 16px; color: #f0dfc0; letter-spacing: 4px; }
+        .lobby .info { color: #f0dfc0; font-size: 16px; text-shadow: 1px 1px 0 #6b4a2a; }
+        @media (max-width:500px) { .game-container { padding:10px; } .card-item { font-size:12px; padding:4px 8px; min-width:56px; } .card-item .card-name { font-size:13px; } .header { font-size:14px; } .header .turn-indicator { font-size:14px; } .modal-box { padding:16px; } }
+    </style>
+</head>
+<body>
+<div class="game-container" id="app">
+    <div id="lobbyView" class="lobby">
+        <h2 style="color:#f7e8c8;text-shadow:2px 2px 0 #6b4a2a;margin:0;">🏯 象棋卡牌</h2>
+        <div class="info">創建或加入房間</div>
+        <button onclick="createRoom()">🆕 創建房間</button>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:center;">
+            <input type="text" id="roomIdInput" placeholder="輸入房號" maxlength="6" inputmode="numeric">
+            <button onclick="joinRoom()">🔗 加入</button>
+        </div>
+        <div id="roomDisplay" style="display:none;">
+            <div class="room-id" id="roomIdDisplay">000000</div>
+            <div class="info" id="roomStatus">等待玩家加入...</div>
+            <button id="startGameBtn" style="display:none;" onclick="startGameFirestore()">🚀 開始遊戲</button>
+        </div>
+        <div id="errorMsg" style="color:#ff6b6b;font-weight:bold;min-height:24px;"></div>
+    </div>
+    <div id="gameView" style="display:none;width:100%;">
+        <div class="header">
+            <div class="turn-indicator" id="turnIndicator">🔴 紅方走</div>
+            <div class="status-msg" id="statusMsg">對局中</div>
+            <div class="btn-group">
+                <button onclick="undoMove()">↩ 悔棋</button>
+                <button onclick="restartGame()">🔄 重開</button>
+                <button onclick="showDrawModal()" style="background:#7a5a30;">🤝 和棋</button>
+                <button onclick="leaveRoom()" style="background:#8b3a3a;">🚪 離開</button>
+            </div>
+        </div>
+        <div class="card-zone" id="blackCardZone"><span class="zone-label">⚫ 黑方</span><div id="blackCards" style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center;width:100%;"></div></div>
+        <div class="canvas-wrap"><canvas id="boardCanvas"></canvas></div>
+        <div class="card-zone" id="redCardZone"><span class="zone-label">🔴 紅方</span><div id="redCards" style="display:flex;flex-wrap:wrap;gap:6px;justify-content:center;width:100%;"></div></div>
+    </div>
+</div>
+<div class="modal-overlay" id="modalCardUse">
+    <div class="modal-box">
+        <h2 id="modalTitle">🃏 卡牌</h2>
+        <div id="modalDesc" class="modal-desc">說明</div>
+        <div id="modalTargets" class="target-grid"></div>
+        <div class="row" id="modalActionRow"><button onclick="closeModal()">取消</button></div>
+    </div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+// ============================================================
+//  🔥 你的 Firebase 金鑰（已嵌入）
+// ============================================================
+const firebaseConfig = {
+    apiKey: "AIzaSyBI5a4fW0RfwtXp6xiwzVuh39govvUQ-VI",
+    authDomain: "ceetest-10288.firebaseapp.com",
+    projectId: "ceetest-10288",
+    storageBucket: "ceetest-10288.firebasestorage.app",
+    messagingSenderId: "987295348205",
+    appId: "1:987295348205:web:756789154b16eb713a63e4",
+    measurementId: "G-YW24WG5L83"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const auth = firebase.auth();
+
+// ============================================================
+//  常數 & 全域變數
+// ============================================================
+const COLS=9, ROWS=10, RED=1, BLACK=2, KING=1, ADVISOR=2, ELEPHANT=3, HORSE=4, ROOK=5, CANNON=6, PAWN=7, QUEEN=8;
+const PIECE_UNICODE={1:{1:'帅',2:'将'},2:{1:'仕',2:'士'},3:{1:'相',2:'象'},4:{1:'马',2:'马'},5:{1:'车',2:'车'},6:{1:'炮',2:'砲'},7:{1:'兵',2:'卒'},8:{1:'后',2:'后'}};
+const CARD_POOL=[
+{id:'swap_pos',name:'移形換位',desc:'交換兩個我方棋子的位置（不可交換將帥）'},
+{id:'thunder',name:'超級無敵霹靂雷霆',desc:'雙方除將帥外，所有棋子25%淘汰'},
+{id:'self_destruct',name:'自毀程序',desc:'選擇己方一個炮，淘汰該炮及其九宮格內所有棋子'},
+{id:'research',name:'博士的研究',desc:'抽兩張牌（不會抽到已有或使用過的）'},
+{id:'charge',name:'大運來嘍！',desc:'車衝鋒至邊緣，清除整排/列所有棋子，使用後回合結束'},
+{id:'divine_troops',name:'神兵天降',desc:'於我方半場的隨機空格召喚3個兵/卒（不結束回合）'},
+{id:'cybertron_spark',name:'賽博坦火種',desc:'選擇我方的一枚兵/卒，將其變為車，使用後回合結束'},
+{id:'invoke_god',name:'請神',desc:'獻祭我方隨機3枚棋子（不含將帥），召喚西洋棋皇后'},
+{id:'royal_guard',name:'皇家護衛',desc:'選擇己方一個士，與我方將帥互換位置（需有士）'},
+{id:'mind_steal',name:'奪心魄',desc:'敵方所有卒/兵各判定一次，25%機率變為我方兵/卒；若我方棋子較多，成功率+10%'},
+{id:'chaos_meteor',name:'混沌流星',desc:'隨機淘汰1～5個場上棋子（不分敵我，不含將帥）'}
+];
+let board=[], turn=RED, selected=null, validMoves=[], moveHistory=[], gameOver=false, winner=null;
+let redCards=[], blackCards=[], usedCardThisTurn=false, opponentCardLocked=false, usedCardIds=new Set(), globalCardDeck=[];
+let pendingCardUse=null, roomId=null, myColor=null, isRoomOwner=false, unsubRoom=null, isSyncing=false;
+const canvas=document.getElementById('boardCanvas'), ctx=canvas.getContext('2d');
+const toastEl=document.getElementById('toast'); let toastTimer=null;
+const modalOverlay=document.getElementById('modalCardUse'), modalTitle=document.getElementById('modalTitle'), modalDesc=document.getElementById('modalDesc'), modalTargets=document.getElementById('modalTargets'), modalActionRow=document.getElementById('modalActionRow');
+
+function isInBoard(r,c){return r>=0&&r<ROWS&&c>=0&&c<COLS;}
+function isInPalace(r,c,color){if(c<3||c>5)return false; return color===RED?r>=7&&r<=9:r>=0&&r<=2;}
+function isOnSide(r,color){return color===RED?r>=5&&r<=9:r>=0&&r<=4;}
+function cloneBoard(b){return b.map(row=>row.map(cell=>cell?{...cell}:0));}
+function findKing(b,color){for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){const p=b[r][c]; if(p&&p.type===KING&&p.color===color)return{row:r,col:c};} return null;}
+function getPieceChar(p){if(!p)return ''; return PIECE_UNICODE[p.type]?.[p.color]||'?';}
+function getColorName(c){return c===RED?'紅':'黑';}
+function shuffleArray(arr){for(let i=arr.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]];} return arr;}
+
+// ---------- 走法生成（完整） ----------
+function generateMovesRaw(b,row,col){
+    const p=b[row][col]; if(!p)return [];
+    const {type,color}=p, enemy=color===RED?BLACK:RED, moves=[];
+    const canPlace=(r,c)=>{if(!isInBoard(r,c))return false; return !b[r][c]||b[r][c].color===enemy;};
+    const addMove=(r,c)=>{if(isInBoard(r,c)&&(!b[r][c]||b[r][c].color===enemy))moves.push({row:r,col:c});};
+    const addLine=(dr,dc)=>{let r=row+dr,c=col+dc; while(isInBoard(r,c)){if(b[r][c]){if(b[r][c].color===enemy)moves.push({row:r,col:c}); break;} moves.push({row:r,col:c}); r+=dr;c+=dc;}};
+    switch(type){
+        case KING:{
+            const dirs=[[-1,0],[1,0],[0,-1],[0,1]];
+            for(const d of dirs){const nr=row+d[0],nc=col+d[1]; if(isInPalace(nr,nc,color)&&canPlace(nr,nc))moves.push({row:nr,col:nc});}
+            const oppKing=findKing(b,enemy);
+            if(oppKing&&oppKing.col===col){let blocked=false; const minR=Math.min(row,oppKing.row),maxR=Math.max(row,oppKing.row); for(let r=minR+1;r<maxR;r++){if(b[r][col]){blocked=true;break;}} if(!blocked)moves.push({row:oppKing.row,col:oppKing.col});}
+            break;}
+        case ADVISOR:{const dirs=[[-1,-1],[-1,1],[1,-1],[1,1]]; for(const d of dirs){const nr=row+d[0],nc=col+d[1]; if(isInPalace(nr,nc,color)&&canPlace(nr,nc))moves.push({row:nr,col:nc});} break;}
+        case ELEPHANT:{const dirs=[[-2,-2],[-2,2],[2,-2],[2,2]]; for(const d of dirs){const nr=row+d[0],nc=col+d[1],br=row+d[0]/2,bc=col+d[1]/2; if(!isOnSide(nr,color))continue; if(isInBoard(nr,nc)&&!b[br][bc]&&canPlace(nr,nc))moves.push({row:nr,col:nc});} break;}
+        case HORSE:{const jumps=[[-2,-1,-1,0],[-2,1,-1,0],[2,-1,1,0],[2,1,1,0],[-1,-2,0,-1],[1,-2,0,-1],[-1,2,0,1],[1,2,0,1]]; for(const j of jumps){const nr=row+j[0],nc=col+j[1],br=row+j[2],bc=col+j[3]; if(!isInBoard(nr,nc))continue; if(!b[br][bc]&&canPlace(nr,nc))moves.push({row:nr,col:nc});} break;}
+        case ROOK:{addLine(-1,0);addLine(1,0);addLine(0,-1);addLine(0,1); break;}
+        case CANNON:{const dirs=[[-1,0],[1,0],[0,-1],[0,1]]; for(const d of dirs){let r=row+d[0],c=col+d[1],jumped=false; while(isInBoard(r,c)){if(!b[r][c]){if(!jumped)moves.push({row:r,col:c});}else{if(!jumped)jumped=true; else{if(b[r][c].color===enemy)moves.push({row:r,col:c}); break;}} r+=d[0];c+=d[1];}} break;}
+        case PAWN:{const forward=color===RED?-1:1; const crossed=color===RED?row<=4:row>=5; const nr=row+forward; if(isInBoard(nr,col)&&canPlace(nr,col))moves.push({row:nr,col:col}); if(crossed){for(const dc of[-1,1]){const nc=col+dc; if(isInBoard(row,nc)&&canPlace(row,nc))moves.push({row:row,col:nc});}} break;}
+        case QUEEN:{const dirs=[[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1],[1,-1],[1,1]]; for(const d of dirs){let r=row+d[0],c=col+d[1]; while(isInBoard(r,c)){if(b[r][c]){if(b[r][c].color===enemy)moves.push({row:r,col:c}); break;} moves.push({row:r,col:c}); r+=d[0];c+=d[1];}} break;}
+    } return moves;
+}
+function generateMoves(b,row,col){
+    const p=b[row][col]; if(!p)return [];
+    const raw=generateMovesRaw(b,row,col), color=p.color, enemy=color===RED?BLACK:RED, filtered=[];
+    for(const m of raw){
+        const sim=cloneBoard(b); sim[m.row][m.col]=sim[row][col]; sim[row][col]=0;
+        const kingPos=findKing(sim,color); if(!kingPos)continue;
+        let inCheck=false;
+        for(let r=0;r<ROWS&&!inCheck;r++)for(let c=0;c<COLS&&!inCheck;c++){const pp=sim[r][c]; if(pp&&pp.color===enemy){const enemyMoves=generateMovesRaw(sim,r,c); if(enemyMoves.some(m2=>m2.row===kingPos.row&&m2.col===kingPos.col))inCheck=true;}}
+        if(!inCheck)filtered.push(m);
+    } return filtered;
+}
+function isInCheck(b,color){const king=findKing(b,color); if(!king)return true; const enemy=color===RED?BLACK:RED; for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){const p=b[r][c]; if(p&&p.color===enemy){const moves=generateMovesRaw(b,r,c); if(moves.some(m=>m.row===king.row&&m.col===king.col))return true;}} return false;}
+function checkGameOver(b,color){const king=findKing(b,color); if(!king)return{over:true,winner:color===RED?BLACK:RED}; for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){const p=b[r][c]; if(p&&p.color===color){const moves=generateMoves(b,r,c); if(moves.length>0)return{over:false};}} return{over:true,winner:color===RED?BLACK:RED};}
+
+// ---------- 初始化 ----------
+function initBoard(){
+    const b=Array(ROWS).fill().map(()=>Array(COLS).fill(0));
+    const backRow=[ROOK,HORSE,ELEPHANT,ADVISOR,KING,ADVISOR,ELEPHANT,HORSE,ROOK];
+    for(let c=0;c<9;c++){b[0][c]={type:backRow[c],color:BLACK}; b[9][c]={type:backRow[c],color:RED};}
+    b[2][1]={type:CANNON,color:BLACK}; b[2][7]={type:CANNON,color:BLACK};
+    b[7][1]={type:CANNON,color:RED}; b[7][7]={type:CANNON,color:RED};
+    for(let c=0;c<9;c+=2){b[3][c]={type:PAWN,color:BLACK}; b[6][c]={type:PAWN,color:RED};}
+    return b;
+}
+function createCardDeck(){const deck=[]; for(const card of CARD_POOL)for(let i=0;i<2;i++)deck.push({...card,uid:card.id+'_'+i}); return shuffleArray(deck);}
+function initCardDeck(){globalCardDeck=createCardDeck(); usedCardIds=new Set();}
+function drawCardsForPlayer(player,count){const hand=player===RED?redCards:blackCards, drawn=[]; for(let i=0;i<count;i++){let card=null; for(let j=0;j<globalCardDeck.length;j++){const c=globalCardDeck[j]; if(!usedCardIds.has(c.uid)&&!hand.some(h=>h.id===c.id)){card=c; globalCardDeck.splice(j,1); break;}} if(!card)break; drawn.push(card); usedCardIds.add(card.uid); hand.push(card);} return drawn;}
+function initCards(){redCards=[]; blackCards=[]; usedCardIds=new Set(); globalCardDeck=createCardDeck(); drawCardsForPlayer(RED,3); drawCardsForPlayer(BLACK,3);}
+function drawExtraCards(player,count){return drawCardsForPlayer(player,count);}
+
+// ---------- 渲染 ----------
+function renderBoard(){
+    const rect=canvas.getBoundingClientRect(), dpr=window.devicePixelRatio||1, w=rect.width||canvas.clientWidth, h=rect.height||canvas.clientHeight;
+    canvas.width=w*dpr; canvas.height=h*dpr; canvas.style.width=w+'px'; canvas.style.height=h+'px'; ctx.scale(dpr,dpr);
+    const cellSize=Math.min(w/10,h/11), marginX=(w-cellSize*8)/2, marginY=(h-cellSize*9)/2;
+    ctx.clearRect(0,0,w,h); ctx.fillStyle='#f0dbb0'; ctx.fillRect(0,0,w,h);
+    ctx.strokeStyle='#5a3a1a'; ctx.lineWidth=1.5;
+    for(let r=0;r<10;r++){const y=marginY+r*cellSize; ctx.beginPath(); ctx.moveTo(marginX,y); ctx.lineTo(marginX+8*cellSize,y); ctx.stroke();}
+    for(let c=0;c<9;c++){const x=marginX+c*cellSize; ctx.beginPath(); ctx.moveTo(x,marginY); ctx.lineTo(x,marginY+9*cellSize); ctx.stroke();}
+    ctx.fillStyle='#d4b080'; ctx.fillRect(marginX,marginY+4*cellSize,8*cellSize,cellSize);
+    ctx.fillStyle='#5a3a1a'; ctx.font=cellSize*0.7+'px serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText('楚  河  漢  界',marginX+4*cellSize,marginY+4.5*cellSize);
+    ctx.strokeStyle='#5a3a1a'; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.moveTo(marginX+3*cellSize,marginY); ctx.lineTo(marginX+5*cellSize,marginY+2*cellSize); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(marginX+5*cellSize,marginY); ctx.lineTo(marginX+3*cellSize,marginY+2*cellSize); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(marginX+3*cellSize,marginY+7*cellSize); ctx.lineTo(marginX+5*cellSize,marginY+9*cellSize); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(marginX+5*cellSize,marginY+7*cellSize); ctx.lineTo(marginX+3*cellSize,marginY+9*cellSize); ctx.stroke();
+    const marks=[[2,1],[2,7],[7,1],[7,7],[3,0],[3,2],[3,4],[3,6],[3,8],[6,0],[6,2],[6,4],[6,6],[6,8]];
+    for(const [r,c] of marks){const x=marginX+c*cellSize,y=marginY+r*cellSize; ctx.strokeStyle='#5a3a1a'; ctx.lineWidth=1; const s=cellSize*0.12; for(const [dx,dy] of [[-1,-1],[-1,1],[1,-1],[1,1]]){ctx.beginPath(); ctx.moveTo(x+dx*s,y+dy*s*0.5); ctx.lineTo(x+dx*s*0.5,y+dy*s); ctx.stroke();}}
+    for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){const p=board[r][c]; if(!p)continue; const x=marginX+c*cellSize,y=marginY+r*cellSize,radius=cellSize*0.42; ctx.shadowColor='rgba(0,0,0,0.3)'; ctx.shadowBlur=6; ctx.shadowOffsetX=2; ctx.shadowOffsetY=2; const grad=ctx.createRadialGradient(x-3,y-3,2,x,y,radius); if(p.color===RED){grad.addColorStop(0,'#f5d0c0'); grad.addColorStop(0.7,'#c0392b'); grad.addColorStop(1,'#7a1f1a');}else{grad.addColorStop(0,'#e0e0e0'); grad.addColorStop(0.7,'#2c3e50'); grad.addColorStop(1,'#1a1a2e');} ctx.beginPath(); ctx.arc(x,y,radius,0,Math.PI*2); ctx.fillStyle=grad; ctx.fill(); ctx.shadowBlur=0; ctx.shadowOffsetX=0; ctx.shadowOffsetY=0; ctx.strokeStyle=p.color===RED?'#7a1f1a':'#1a1a2e'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(x,y,radius,0,Math.PI*2); ctx.stroke(); const char=getPieceChar(p); ctx.fillStyle=p.color===RED?'#fff8e0':'#f0f0f0'; ctx.font='bold '+cellSize*0.6+'px "SimSun","Microsoft YaHei",serif'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.shadowColor='rgba(0,0,0,0.5)'; ctx.shadowBlur=4; ctx.fillText(char,x+1,y+1); ctx.shadowBlur=0;}
+    if(selected){const sx=marginX+selected.col*cellSize,sy=marginY+selected.row*cellSize; ctx.strokeStyle='#ffdd44'; ctx.lineWidth=4; ctx.shadowBlur=12; ctx.shadowColor='#ffdd44'; ctx.beginPath(); ctx.arc(sx,sy,cellSize*0.45,0,Math.PI*2); ctx.stroke(); ctx.shadowBlur=0; for(const m of validMoves){const mx=marginX+m.col*cellSize,my=marginY+m.row*cellSize; ctx.fillStyle=board[m.row][m.col]?'rgba(255,50,50,0.5)':'rgba(50,255,50,0.4)'; ctx.beginPath(); ctx.arc(mx,my,cellSize*0.2,0,Math.PI*2); ctx.fill();}}
+    for(const color of[RED,BLACK]){const king=findKing(board,color); if(king&&isInCheck(board,color)){const kx=marginX+king.col*cellSize,ky=marginY+king.row*cellSize; ctx.strokeStyle='#ff0000'; ctx.lineWidth=3; ctx.shadowBlur=16; ctx.shadowColor='#ff0000'; ctx.beginPath(); ctx.arc(kx,ky,cellSize*0.48,0,Math.PI*2); ctx.stroke(); ctx.shadowBlur=0;}}
+}
+function renderCards(){
+    const redContainer=document.getElementById('redCards'), blackContainer=document.getElementById('blackCards');
+    redContainer.innerHTML=''; blackContainer.innerHTML='';
+    const canUse=!usedCardThisTurn&&!gameOver&&!opponentCardLocked, isRedTurn=turn===RED;
+    redCards.forEach(card=>{const el=createCardElement(card,RED,canUse&&isRedTurn); redContainer.appendChild(el);});
+    blackCards.forEach(card=>{const el=createCardElement(card,BLACK,canUse&&!isRedTurn); blackContainer.appendChild(el);});
+}
+function createCardElement(card,color,enabled){const div=document.createElement('div'); div.className='card-item'+(enabled?'':' disabled'); div.innerHTML='<div class="card-name">'+card.name+'</div><div class="card-desc">'+card.desc+'</div><div class="long-press-hint">👆 點擊使用</div>'; if(enabled){div.addEventListener('click',()=>onCardClick(card,color)); div.addEventListener('touchend',(e)=>{e.preventDefault(); onCardClick(card,color);});} return div;}
+function updateUI(){renderBoard(); renderCards(); updateStatus();}
+function updateStatus(){const indicator=document.getElementById('turnIndicator'), statusMsg=document.getElementById('statusMsg'); if(gameOver){if(winner){indicator.innerHTML='🏆 '+getColorName(winner)+'方勝利！'; statusMsg.textContent='遊戲結束';}else{indicator.innerHTML='🤝 和棋'; statusMsg.textContent='平局';} return;} const name=getColorName(turn), emoji=turn===RED?'🔴':'⚫'; indicator.innerHTML=emoji+' '+name+'方走'; let msg=isInCheck(board,turn)?'⚠️ 將軍！':'對局中'; if(opponentCardLocked)msg+=' (卡牌被封鎖)'; statusMsg.textContent=msg;}
+
+// ---------- 走棋 ----------
+function getRowColFromEvent(e){
+    const rect=canvas.getBoundingClientRect(), w=rect.width, h=rect.height;
+    const cellSize=Math.min(w/10,h/11), marginX=(w-cellSize*8)/2, marginY=(h-cellSize*9)/2;
+    let clientX,clientY; if(e.touches&&e.touches.length>0){clientX=e.touches[0].clientX; clientY=e.touches[0].clientY;}else if(e.changedTouches&&e.changedTouches.length>0){clientX=e.changedTouches[0].clientX; clientY=e.changedTouches[0].clientY;}else{clientX=e.clientX; clientY=e.clientY;}
+    const x=(clientX-rect.left-marginX)/cellSize, y=(clientY-rect.top-marginY)/cellSize;
+    const col=Math.round(x), row=Math.round(y); if(!isInBoard(row,col))return null; return{row,col};
+}
+function handleBoardClickAt(row,col){
+    if(gameOver)return;
+    if(selected&&validMoves.some(m=>m.row===row&&m.col===col)){makeMove(selected.row,selected.col,row,col); return;}
+    const p=board[row][col]; if(!p||p.color!==turn){selected=null; validMoves=[]; updateUI(); return;}
+    const moves=generateMoves(board,row,col); if(moves.length===0){showToast('此棋子無合法走法'); return;}
+    selected={row,col}; validMoves=moves; showToast(getColorName(p.color)+getPieceChar(p)+' ('+(row+1)+','+String.fromCharCode(65+col)+')'); updateUI();
+}
+function makeMove(fromRow,fromCol,toRow,toCol){
+    const captured=board[toRow][toCol], moved=board[fromRow][fromCol];
+    moveHistory.push({from:{row:fromRow,col:fromCol},to:{row:toRow,col:toCol},piece:{...moved},captured:captured?{...captured}:null,turn:turn,redCards:redCards.map(c=>({...c})),blackCards:blackCards.map(c=>({...c})),usedCardIds:new Set(usedCardIds)});
+    board[toRow][toCol]=moved; board[fromRow][fromCol]=0;
+    if(opponentCardLocked)opponentCardLocked=false;
+    const enemy=turn===RED?BLACK:RED; const result=checkGameOver(board,enemy);
+    if(result.over){gameOver=true; winner=result.winner; selected=null; validMoves=[]; usedCardThisTurn=true; updateUI(); showToast('🏆 '+getColorName(winner)+'方勝利！'); writeStateToFirestore(); return;}
+    turn=enemy; selected=null; validMoves=[]; usedCardThisTurn=false; updateUI(); writeStateToFirestore();
+    if(isInCheck(board,turn))showToast('⚠️ '+getColorName(turn)+'方被將軍！');
+}
+function endTurnAfterCard(){
+    const enemy=turn===RED?BLACK:RED; const result=checkGameOver(board,enemy);
+    if(result.over){gameOver=true; winner=result.winner; selected=null; validMoves=[]; usedCardThisTurn=true; updateUI(); showToast('🏆 '+getColorName(winner)+'方勝利！'); writeStateToFirestore(); return;}
+    turn=enemy; selected=null; validMoves=[]; usedCardThisTurn=false; updateUI(); writeStateToFirestore();
+    if(isInCheck(board,turn))showToast('⚠️ '+getColorName(turn)+'方被將軍！');
+}
+function undoMove(){
+    if(moveHistory.length===0){showToast('沒有可悔的棋'); return;}
+    if(gameOver){gameOver=false; winner=null;}
+    const last=moveHistory.pop(); board[last.from.row][last.from.col]=last.piece; board[last.to.row][last.to.col]=last.captured||0; turn=last.turn; selected=null; validMoves=[]; usedCardThisTurn=false; opponentCardLocked=false; redCards=last.redCards.map(c=>({...c})); blackCards=last.blackCards.map(c=>({...c})); usedCardIds=new Set(last.usedCardIds); updateUI(); showToast('已悔棋'); writeStateToFirestore();
+}
+function restartGame(){
+    if(!isRoomOwner){showToast('只有房主可以重開'); return;}
+    board=initBoard(); turn=RED; selected=null; validMoves=[]; moveHistory=[]; gameOver=false; winner=null; usedCardThisTurn=false; opponentCardLocked=false; pendingCardUse=null; initCardDeck(); initCards(); updateUI(); showToast('新遊戲開始！'); writeStateToFirestore();
+}
+function showDrawModal(){if(gameOver)return; openModal('🤝 提和','雙方是否同意和棋？',[{text:'同意和棋',action:()=>{closeModal(); gameOver=true; winner=null; updateUI(); showToast('🤝 雙方和棋'); writeStateToFirestore();}},{text:'拒絕',action:()=>{closeModal(); showToast('和棋被拒絕');}}]);}
+
+// ---------- 模态框 ----------
+function openModal(title,desc,buttons){modalTitle.textContent=title; modalDesc.textContent=desc; modalTargets.innerHTML=''; modalActionRow.innerHTML=''; if(buttons){buttons.forEach(b=>{const btn=document.createElement('button'); btn.textContent=b.text; if(b.primary)btn.classList.add('primary'); btn.onclick=b.action; modalActionRow.appendChild(btn);});}else{const cancel=document.createElement('button'); cancel.textContent='取消'; cancel.onclick=closeModal; modalActionRow.appendChild(cancel);} modalOverlay.classList.add('show');}
+function closeModal(){modalOverlay.classList.remove('show'); if(pendingCardUse)cancelCardUse();}
+function cancelCardUse(){if(pendingCardUse){const card=pendingCardUse.card, color=pendingCardUse.color; const hand=color===RED?redCards:blackCards; if(!hand.includes(card))hand.push(card); usedCardThisTurn=false; pendingCardUse=null; closeModal(); updateUI(); showToast('已取消卡牌使用');}else{closeModal();}}
+
+// ---------- 卡牌點擊 ----------
+function onCardClick(card,color){
+    if(gameOver)return; if(usedCardThisTurn){showToast('本回合已使用過卡牌'); return;} if(opponentCardLocked){showToast('被緩兵之計封鎖，無法使用卡牌'); return;} if(color!==turn){showToast('只能在你的回合使用卡牌'); return;}
+    openModal('🃏 '+card.name,'效果：'+card.desc+'\n\n確定要使用嗎？',[{text:'✅ 確認使用',primary:true,action:()=>{closeModal(); const hand=color===RED?redCards:blackCards; const idx=hand.indexOf(card); if(idx===-1)return; hand.splice(idx,1); usedCardThisTurn=true; usedCardIds.add(card.uid); executeCardEffect(card,color);}},{text:'❌ 取消',action:()=>{closeModal();}}]);
+}
+
+// ---------- 核心：卡牌效果（完整 11 張） ----------
+function executeCardEffect(card,color){
+    const enemy=color===RED?BLACK:RED, cardId=card.id;
+    switch(cardId){
+        case 'swap_pos':{
+            const pieces=[]; for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){const p=board[r][c]; if(p&&p.color===color&&p.type!==KING)pieces.push({row:r,col:c,name:getPieceChar(p),type:p.type});}
+            if(pieces.length<2){showToast('場上可交換的己方棋子少於2個（不含將帥）'); usedCardThisTurn=false; updateUI(); return;}
+            pendingCardUse={card,color,step:0,data:{pieces,selected1:null,selectedIdx:-1}}; showSwapModal(pieces,0); break;
+        }
+        case 'thunder':{
+            const toRemove=[]; for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){const p=board[r][c]; if(p&&p.type!==KING&&Math.random()<0.25)toRemove.push({row:r,col:c});}
+            for(const pos of toRemove)board[pos.row][pos.col]=0;
+            if(!checkAndFinishAfterEffect(color)){showToast('⚡ 雷霆過後，淘汰了 '+toRemove.length+' 個棋子'); updateUI(); writeStateToFirestore();}
+            break;
+        }
+        case 'self_destruct':{
+            const cannons=[]; for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){const p=board[r][c]; if(p&&p.type===CANNON&&p.color===color)cannons.push({row:r,col:c});}
+            if(cannons.length===0){showToast('場上沒有己方炮，無法使用'); usedCardThisTurn=false; updateUI(); return;}
+            pendingCardUse={card,color,step:0,data:{cannons}}; showSelfDestructModal(cannons); break;
+        }
+        case 'research':{const drawn=drawExtraCards(color,2); showToast('📚 博士的研究，抽到 '+drawn.length+' 張牌'); updateUI(); writeStateToFirestore(); break;}
+        case 'charge':{
+            const rooks=[]; for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){const p=board[r][c]; if(p&&p.type===ROOK&&p.color===color)rooks.push({row:r,col:c});}
+            if(rooks.length===0){showToast('場上沒有己方車，無法使用'); usedCardThisTurn=false; updateUI(); return;}
+            pendingCardUse={card,color,step:0,data:{rooks,selectedRook:null,dir:null}}; showChargeModal(rooks); break;
+        }
+        case 'divine_troops':{
+            const emptySpots=[]; const isRed=color===RED; for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){if(!board[r][c]){if(isRed&&r>=5&&r<=9)emptySpots.push({row:r,col:c}); else if(!isRed&&r>=0&&r<=4)emptySpots.push({row:r,col:c});}}
+            if(emptySpots.length===0){showToast('我方半場沒有空格，無法召喚'); usedCardThisTurn=false; updateUI(); return;}
+            const count=Math.min(3,emptySpots.length), shuffled=shuffleArray([...emptySpots]), selectedSpots=shuffled.slice(0,count);
+            for(const pos of selectedSpots)board[pos.row][pos.col]={type:PAWN,color:color};
+            if(!checkAndFinishAfterEffect(color)){showToast('✨ 神兵天降，召喚了 '+count+' 個'+(color===RED?'兵':'卒')); updateUI(); writeStateToFirestore();}
+            break;
+        }
+        case 'cybertron_spark':{
+            const pawns=[]; for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){const p=board[r][c]; if(p&&p.type===PAWN&&p.color===color)pawns.push({row:r,col:c});}
+            if(pawns.length===0){showToast('場上沒有己方兵/卒，無法使用'); usedCardThisTurn=false; updateUI(); return;}
+            pendingCardUse={card,color,step:0,data:{pawns}}; showCybertronModal(pawns,color); break;
+        }
+        case 'invoke_god':{
+            const myPieces=[]; for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){const p=board[r][c]; if(p&&p.color===color&&p.type!==KING)myPieces.push({row:r,col:c});}
+            if(myPieces.length<3){showToast('我方場上可獻祭的棋子少於3個（不含將帥），無法使用'); usedCardThisTurn=false; updateUI(); return;}
+            const shuffled=shuffleArray([...myPieces]), selectedPieces=shuffled.slice(0,3);
+            const positions=selectedPieces.map(p=>({row:p.row,col:p.col})); for(const pos of positions)board[pos.row][pos.col]=0;
+            const randIndex=Math.floor(Math.random()*positions.length), spawnPos=positions[randIndex];
+            board[spawnPos.row][spawnPos.col]={type:QUEEN,color:color};
+            if(!checkAndFinishAfterEffect(color)){showToast('🙏 獻祭了 3 個棋子，召喚皇后於 ('+(spawnPos.row+1)+','+String.fromCharCode(65+spawnPos.col)+')'); updateUI(); writeStateToFirestore();}
+            break;
+        }
+        case 'royal_guard':{
+            const advisors=[]; let kingPos=null; for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){const p=board[r][c]; if(p&&p.color===color){if(p.type===ADVISOR)advisors.push({row:r,col:c}); else if(p.type===KING)kingPos={row:r,col:c};}}
+            if(advisors.length===0){showToast('場上沒有己方士，無法使用'); usedCardThisTurn=false; updateUI(); return;} if(!kingPos){showToast('找不到己方將帥，無法使用'); usedCardThisTurn=false; updateUI(); return;}
+            const buttons=advisors.map((a,idx)=>({text:'士 ('+(a.row+1)+','+String.fromCharCode(65+a.col)+')',action:()=>{const temp=board[a.row][a.col]; board[a.row][a.col]=board[kingPos.row][kingPos.col]; board[kingPos.row][kingPos.col]=temp; pendingCardUse=null; closeModal(); selected=null; validMoves=[]; if(!checkAndFinishAfterEffect(color)){showToast('🛡️ 士與將帥互換位置'); updateUI(); writeStateToFirestore();}}}));
+            buttons.push({text:'取消',action:()=>{cancelCardUse();}}); openModal('🛡️ 皇家護衛','選擇要與將帥互換的士',buttons); break;
+        }
+        case 'mind_steal':{
+            let myCount=0,enemyCount=0; for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){const p=board[r][c]; if(p){if(p.color===color)myCount++; else enemyCount++;}}
+            const bonus=(myCount>enemyCount)?0.10:0, baseRate=0.25, successRate=Math.min(baseRate+bonus,1.0);
+            const enemyPawns=[]; for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){const p=board[r][c]; if(p&&p.color===enemy&&p.type===PAWN)enemyPawns.push({row:r,col:c});}
+            let converted=0; for(const pos of enemyPawns){if(Math.random()<successRate){board[pos.row][pos.col]={type:PAWN,color:color}; converted++;}}
+            if(!checkAndFinishAfterEffect(color)){showToast('🧠 奪心魄：'+converted+' 個敵方兵/卒被轉化 (成功率 '+Math.round(successRate*100)+'%)'); updateUI(); writeStateToFirestore();}
+            break;
+        }
+        case 'chaos_meteor':{
+            const candidates=[]; for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){const p=board[r][c]; if(p&&p.type!==KING)candidates.push({row:r,col:c});}
+            if(candidates.length===0){showToast('場上沒有可淘汰的棋子（不含將帥）'); usedCardThisTurn=false; updateUI(); return;}
+            const maxNum=Math.min(5,candidates.length), num=Math.floor(Math.random()*maxNum)+1;
+            const shuffled=shuffleArray([...candidates]), selected=shuffled.slice(0,num);
+            for(const pos of selected)board[pos.row][pos.col]=0;
+            if(!checkAndFinishAfterEffect(color)){showToast('☄️ 混沌流星：淘汰了 '+num+' 個棋子'); updateUI(); writeStateToFirestore();}
+            break;
+        }
+        default:{showToast('未知卡牌效果'); updateUI();}
+    }
+}
+function checkAndFinishAfterEffect(color){const enemy=color===RED?BLACK:RED; const r1=checkGameOver(board,color); if(r1.over){gameOver=true; winner=r1.winner; updateUI(); showToast('🏆 '+getColorName(winner)+'方勝利！'); writeStateToFirestore(); return true;} const r2=checkGameOver(board,enemy); if(r2.over){gameOver=true; winner=r2.winner; updateUI(); showToast('🏆 '+getColorName(winner)+'方勝利！'); writeStateToFirestore(); return true;} return false;}
+
+// ---------- 選擇模態輔助 ----------
+function showSwapModal(pieces,step){const title='🔄 移形換位', desc=step===0?'選擇第一個要交換的棋子（不可選將帥）':'已選，選擇第二個'; const buttons=pieces.map((p,i)=>({text:p.name+' ('+(p.row+1)+','+String.fromCharCode(65+p.col)+')',action:step===0?()=>{pendingCardUse.data.selectedIdx=i; pendingCardUse.data.selected1=p; pendingCardUse.step=1; showSwapModal(pieces,1);}:()=>{const p1=pendingCardUse.data.selected1,p2=p; const temp=board[p1.row][p1.col]; board[p1.row][p1.col]=board[p2.row][p2.col]; board[p2.row][p2.col]=temp; pendingCardUse=null; closeModal(); selected=null; validMoves=[]; if(!checkAndFinishAfterEffect(pendingCardUse?.color||turn)){showToast('🔄 已交換 '+p1.name+' 與 '+p2.name); updateUI(); writeStateToFirestore();}}})); buttons.push({text:'取消',action:()=>{cancelCardUse();}}); openModal(title,desc,buttons);}
+function showSelfDestructModal(cannons){const title='💥 自毀程序', desc='選擇要引爆的炮（將清除該炮及其九宮格內所有棋子）'; const buttons=cannons.map(p=>({text:'炮 ('+(p.row+1)+','+String.fromCharCode(65+p.col)+')',action:()=>{const r=p.row,c=p.col; const toRemove=[]; for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){const nr=r+dr,nc=c+dc; if(isInBoard(nr,nc))toRemove.push({row:nr,col:nc});} for(const pos of toRemove)board[pos.row][pos.col]=0; pendingCardUse=null; closeModal(); if(!checkAndFinishAfterEffect(turn)){showToast('💥 炮自毀，清除 '+toRemove.length+' 個棋子'); updateUI(); writeStateToFirestore();}}})); buttons.push({text:'取消',action:()=>{cancelCardUse();}}); openModal(title,desc,buttons);}
+function showChargeModal(rooks){const title='🚀 大運來嘍！', desc='選擇要衝鋒的車（將清除整排/列所有棋子並移動至邊緣）'; const buttons=rooks.map(p=>({text:'車 ('+(p.row+1)+','+String.fromCharCode(65+p.col)+')',action:()=>{pendingCardUse.data.selectedRook=p; pendingCardUse.step=1; const dirs=[{text:'⬆ 上',dr:-1,dc:0},{text:'⬇ 下',dr:1,dc:0},{text:'⬅ 左',dr:0,dc:-1},{text:'➡ 右',dr:0,dc:1}]; const dirButtons=dirs.map(d=>({text:d.text,action:()=>{const rook=pendingCardUse.data.selectedRook; const r=rook.row,c=rook.col; let nr=r+d.dr,nc=c+d.dc,lastRow=r,lastCol=c; const toRemove=[]; while(isInBoard(nr,nc)){if(board[nr][nc])toRemove.push({row:nr,col:nc}); lastRow=nr; lastCol=nc; nr+=d.dr; nc+=d.dc;} for(const pos of toRemove)board[pos.row][pos.col]=0; if(lastRow!==r||lastCol!==c){board[lastRow][lastCol]=board[r][c]; board[r][c]=0;} pendingCardUse=null; closeModal(); if(!checkAndFinishAfterEffect(turn)){showToast('🚀 車衝鋒至邊緣，清除 '+toRemove.length+' 個棋子，回合結束'); endTurnAfterCard();}}})); dirButtons.push({text:'取消',action:()=>{cancelCardUse();}}); openModal(title,'選擇衝鋒方向',dirButtons);}})); buttons.push({text:'取消',action:()=>{cancelCardUse();}}); openModal(title,desc,buttons);}
+function showCybertronModal(pawns,color){const title='🔥 賽博坦火種', desc='選擇要轉化為車的兵/卒（使用後回合結束）'; const buttons=pawns.map(p=>{const piece=board[p.row][p.col]; return{text:getPieceChar(piece)+' ('+(p.row+1)+','+String.fromCharCode(65+p.col)+')',action:()=>{const cur=board[p.row][p.col]; if(!cur||cur.type!==PAWN||cur.color!==color){showToast('該兵/卒已不存在'); pendingCardUse=null; closeModal(); updateUI(); return;} board[p.row][p.col]={type:ROOK,color:color}; pendingCardUse=null; closeModal(); if(!checkAndFinishAfterEffect(color)){showToast('🔥 兵/卒已變為車！回合結束'); endTurnAfterCard();}}}}); buttons.push({text:'取消',action:()=>{cancelCardUse();}}); openModal(title,desc,buttons);}
+function showToast(msg){toastEl.textContent=msg; toastEl.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>toastEl.classList.remove('show'),2500);}
+
+// ============================================================
+//  Firebase 聯機核心
+// ============================================================
+function writeStateToFirestore(){
+    if(!roomId || isSyncing) return;
+    isSyncing = true;
+    const payload = {
+        board: board,
+        turn: turn,
+        redCards: redCards,
+        blackCards: blackCards,
+        moveHistory: moveHistory,
+        usedCardIds: Array.from(usedCardIds),
+        gameOver: gameOver,
+        winner: winner,
+        usedCardThisTurn: usedCardThisTurn,
+        opponentCardLocked: opponentCardLocked,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    };
+    // 限制單文件大小（Firestore 上限 1MB），過大則拒絕寫入
+    const sizeEst = JSON.stringify(payload).length;
+    if(sizeEst > 900000) {
+        showToast('⚠️ 遊戲狀態過大，請重開新局');
+        isSyncing = false;
+        return;
+    }
+    db.collection('rooms').doc(roomId).update(payload)
+        .catch(err=>{ console.warn('寫入失敗', err); showToast('⚠️ 同步失敗，請重試'); })
+        .finally(()=>{ isSyncing = false; });
+}
+
+function listenRoom(rid){
+    if(unsubRoom) unsubRoom();
+    unsubRoom = db.collection('rooms').doc(rid).onSnapshot(snapshot=>{
+        if(!snapshot.exists){ showToast('房間已不存在'); leaveRoom(); return; }
+        const data = snapshot.data();
+        if(!data.players || !data.players[auth.currentUser?.uid]) {
+            if(roomId) leaveRoom();
+            return;
+        }
+        if(!isSyncing && data.board){
+            board = data.board;
+            turn = data.turn || RED;
+            redCards = data.redCards || [];
+            blackCards = data.blackCards || [];
+            moveHistory = data.moveHistory || [];
+            usedCardIds = new Set(data.usedCardIds || []);
+            gameOver = data.gameOver || false;
+            winner = data.winner || null;
+            usedCardThisTurn = data.usedCardThisTurn || false;
+            opponentCardLocked = data.opponentCardLocked || false;
+            selected = null;
+            validMoves = [];
+            updateUI();
+        }
+        const pList = data.players ? Object.keys(data.players) : [];
+        const statusEl = document.getElementById('roomStatus');
+        if(statusEl){
+            if(pList.length === 1) statusEl.textContent = '⏳ 等待玩家加入 (1/2)';
+            else if(pList.length === 2) {
+                if(!data.started) statusEl.textContent = '✅ 兩人已到齊，房主請按開始';
+                else statusEl.textContent = '⚔️ 對戰中';
+            }
+        }
+        const startBtn = document.getElementById('startGameBtn');
+        if(startBtn && data.owner === auth.currentUser?.uid && pList.length === 2 && !data.started){
+            startBtn.style.display = 'block';
+        } else if(startBtn) {
+            startBtn.style.display = 'none';
+        }
+    }, err=>{
+        console.error('監聽錯誤', err);
+        showToast('連線中斷，重新整理');
+    });
+}
+
+async function createRoom(){
+    try{
+        const user = await auth.signInAnonymously();
+        const rid = String(Math.floor(100000 + Math.random()*900000));
+        const roomData = {
+            roomId: rid,
+            owner: user.user.uid,
+            players: { [user.user.uid]: { color: RED, name: '紅方' } },
+            board: initBoard(),
+            turn: RED,
+            redCards: [],
+            blackCards: [],
+            moveHistory: [],
+            usedCardIds: [],
+            gameOver: false,
+            winner: null,
+            usedCardThisTurn: false,
+            opponentCardLocked: false,
+            started: false,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        await db.collection('rooms').doc(rid).set(roomData);
+        roomId = rid;
+        myColor = RED;
+        isRoomOwner = true;
+        initCardDeck();
+        initCards();
+        await db.collection('rooms').doc(rid).update({
+            redCards: redCards,
+            blackCards: blackCards,
+            usedCardIds: Array.from(usedCardIds)
+        });
+        document.getElementById('lobbyView').style.display = 'none';
+        document.getElementById('gameView').style.display = 'block';
+        document.getElementById('roomDisplay').style.display = 'block';
+        document.getElementById('roomIdDisplay').textContent = rid;
+        listenRoom(rid);
+        updateUI();
+        showToast('✅ 房間建立！房號 '+rid);
+    }catch(e){ console.error(e); document.getElementById('errorMsg').textContent='❌ 建立失敗：'+e.message; }
+}
+
+async function joinRoom(){
+    const input = document.getElementById('roomIdInput');
+    const rid = input.value.trim();
+    if(!rid || rid.length!==6){ document.getElementById('errorMsg').textContent='請輸入6位房號'; return; }
+    try{
+        const user = await auth.signInAnonymously();
+        const doc = await db.collection('rooms').doc(rid).get();
+        if(!doc.exists){ document.getElementById('errorMsg').textContent='❌ 房間不存在'; return; }
+        const data = doc.data();
+        if(data.players && Object.keys(data.players).length >= 2){ document.getElementById('errorMsg').textContent='❌ 房間已滿'; return; }
+        if(data.started){ document.getElementById('errorMsg').textContent='❌ 遊戲已開始'; return; }
+        const updateObj = { [`players.${user.user.uid}`]: { color: BLACK, name: '黑方' } };
+        await db.collection('rooms').doc(rid).update(updateObj);
+        roomId = rid;
+        myColor = BLACK;
+        isRoomOwner = false;
+        const newData = (await db.collection('rooms').doc(rid).get()).data();
+        board = newData.board || initBoard();
+        turn = newData.turn || RED;
+        redCards = newData.redCards || [];
+        blackCards = newData.blackCards || [];
+        moveHistory = newData.moveHistory || [];
+        usedCardIds = new Set(newData.usedCardIds || []);
+        gameOver = newData.gameOver || false;
+        winner = newData.winner || null;
+        usedCardThisTurn = newData.usedCardThisTurn || false;
+        opponentCardLocked = newData.opponentCardLocked || false;
+        document.getElementById('lobbyView').style.display = 'none';
+        document.getElementById('gameView').style.display = 'block';
+        document.getElementById('roomDisplay').style.display = 'block';
+        document.getElementById('roomIdDisplay').textContent = rid;
+        listenRoom(rid);
+        updateUI();
+        showToast('✅ 加入房間成功！你是黑方');
+    }catch(e){ console.error(e); document.getElementById('errorMsg').textContent='❌ 加入失敗：'+e.message; }
+}
+
+async function startGameFirestore(){
+    if(!isRoomOwner){ showToast('只有房主能開始'); return; }
+    try{
+        initCardDeck();
+        initCards();
+        await db.collection('rooms').doc(roomId).update({
+            started: true,
+            board: board,
+            turn: RED,
+            redCards: redCards,
+            blackCards: blackCards,
+            usedCardIds: Array.from(usedCardIds),
+            moveHistory: [],
+            gameOver: false,
+            winner: null,
+            usedCardThisTurn: false,
+            opponentCardLocked: false
+        });
+        showToast('🚀 遊戲開始！紅方先走');
+        document.getElementById('startGameBtn').style.display = 'none';
+    }catch(e){ showToast('開始失敗：'+e.message); }
+}
+
+function leaveRoom(){
+    if(unsubRoom){ unsubRoom(); unsubRoom=null; }
+    if(roomId && auth.currentUser){
+        db.collection('rooms').doc(roomId).get().then(doc=>{
+            if(doc.exists && doc.data().owner === auth.currentUser.uid){
+                const pCount = Object.keys(doc.data().players||{}).length;
+                if(pCount <= 1) db.collection('rooms').doc(roomId).delete().catch(()=>{});
+                else {
+                    const players = doc.data().players;
+                    const newOwner = Object.keys(players).find(uid=>uid!==auth.currentUser.uid);
+                    if(newOwner) db.collection('rooms').doc(roomId).update({ owner: newOwner }).catch(()=>{});
+                }
+            } else {
+                db.collection('rooms').doc(roomId).update({
+                    [`players.${auth.currentUser.uid}`]: firebase.firestore.FieldValue.delete()
+                }).catch(()=>{});
+            }
+        }).catch(()=>{});
+    }
+    roomId=null; myColor=null; isRoomOwner=false;
+    document.getElementById('lobbyView').style.display = 'flex';
+    document.getElementById('gameView').style.display = 'none';
+    document.getElementById('roomDisplay').style.display = 'none';
+    document.getElementById('startGameBtn').style.display = 'none';
+    showToast('已離開房間');
+}
+
+function onCanvasPointerDown(e){
+    e.preventDefault();
+    if(!roomId) return;
+    const pos = getRowColFromEvent(e);
+    if(pos) handleBoardClickAt(pos.row, pos.col);
+}
+function bindCanvasEvents(){
+    canvas.removeEventListener('pointerdown', onCanvasPointerDown);
+    canvas.addEventListener('pointerdown', onCanvasPointerDown);
+    canvas.addEventListener('contextmenu', e=>e.preventDefault());
+}
+
+function init(){
+    auth.signInAnonymously().catch(e=>console.warn('匿名登入失敗', e));
+    board = initBoard();
+    turn = RED;
+    selected = null;
+    validMoves = [];
+    moveHistory = [];
+    gameOver = false;
+    winner = null;
+    usedCardThisTurn = false;
+    opponentCardLocked = false;
+    initCardDeck();
+    initCards();
+    bindCanvasEvents();
+    updateUI();
+    document.getElementById('lobbyView').style.display = 'flex';
+    document.getElementById('gameView').style.display = 'none';
+    document.getElementById('roomDisplay').style.display = 'none';
+    showToast('🏯 歡迎！創建或加入房間');
+}
+window.addEventListener('resize', ()=>{ if(!gameOver || true) updateUI(); });
+init();
+console.log('✅ 象棋卡牌對戰 · Firebase 聯機版已啟動');
+</script>
+</body>
+</html>
