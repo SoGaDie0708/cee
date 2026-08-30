@@ -98,7 +98,7 @@
 <div class="toast" id="toast"></div>
 <script>
 // ============================================================
-//  🔥 你的 Firebase 金鑰（已嵌入）
+//  Firebase 金鑰（你的）
 // ============================================================
 const firebaseConfig = {
     apiKey: "AIzaSyBI5a4fW0RfwtXp6xiwzVuh39govvUQ-VI",
@@ -137,6 +137,27 @@ let pendingCardUse=null, roomId=null, myColor=null, isRoomOwner=false, unsubRoom
 const canvas=document.getElementById('boardCanvas'), ctx=canvas.getContext('2d');
 const toastEl=document.getElementById('toast'); let toastTimer=null;
 const modalOverlay=document.getElementById('modalCardUse'), modalTitle=document.getElementById('modalTitle'), modalDesc=document.getElementById('modalDesc'), modalTargets=document.getElementById('modalTargets'), modalActionRow=document.getElementById('modalActionRow');
+
+// ========== 新增：轉換函數（解決嵌套陣列問題） ==========
+function boardToObject(b) {
+    const obj = {};
+    for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+            if (b[r][c]) obj[r + '_' + c] = b[r][c];
+        }
+    }
+    return obj;
+}
+function objectToBoard(obj) {
+    const b = Array(ROWS).fill().map(() => Array(COLS).fill(0));
+    if (!obj) return b;
+    for (let key in obj) {
+        const [r, c] = key.split('_').map(Number);
+        b[r][c] = obj[key];
+    }
+    return b;
+}
+// ============================================================
 
 function isInBoard(r,c){return r>=0&&r<ROWS&&c>=0&&c<COLS;}
 function isInPalace(r,c,color){if(c<3||c>5)return false; return color===RED?r>=7&&r<=9:r>=0&&r<=2;}
@@ -371,13 +392,13 @@ function showCybertronModal(pawns,color){const title='🔥 賽博坦火種', des
 function showToast(msg){toastEl.textContent=msg; toastEl.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>toastEl.classList.remove('show'),2500);}
 
 // ============================================================
-//  Firebase 聯機核心
+//  Firebase 聯機核心（已修正嵌套陣列問題）
 // ============================================================
 function writeStateToFirestore(){
     if(!roomId || isSyncing) return;
     isSyncing = true;
     const payload = {
-        board: board,
+        board: boardToObject(board),   // 轉換為物件
         turn: turn,
         redCards: redCards,
         blackCards: blackCards,
@@ -389,7 +410,6 @@ function writeStateToFirestore(){
         opponentCardLocked: opponentCardLocked,
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     };
-    // 限制單文件大小（Firestore 上限 1MB），過大則拒絕寫入
     const sizeEst = JSON.stringify(payload).length;
     if(sizeEst > 900000) {
         showToast('⚠️ 遊戲狀態過大，請重開新局');
@@ -411,7 +431,7 @@ function listenRoom(rid){
             return;
         }
         if(!isSyncing && data.board){
-            board = data.board;
+            board = objectToBoard(data.board);   // 轉回陣列
             turn = data.turn || RED;
             redCards = data.redCards || [];
             blackCards = data.blackCards || [];
@@ -454,7 +474,7 @@ async function createRoom(){
             roomId: rid,
             owner: user.user.uid,
             players: { [user.user.uid]: { color: RED, name: '紅方' } },
-            board: initBoard(),
+            board: boardToObject(initBoard()),   // 轉換
             turn: RED,
             redCards: [],
             blackCards: [],
@@ -505,7 +525,7 @@ async function joinRoom(){
         myColor = BLACK;
         isRoomOwner = false;
         const newData = (await db.collection('rooms').doc(rid).get()).data();
-        board = newData.board || initBoard();
+        board = newData.board ? objectToBoard(newData.board) : initBoard();  // 轉回
         turn = newData.turn || RED;
         redCards = newData.redCards || [];
         blackCards = newData.blackCards || [];
@@ -532,7 +552,7 @@ async function startGameFirestore(){
         initCards();
         await db.collection('rooms').doc(roomId).update({
             started: true,
-            board: board,
+            board: boardToObject(board),   // 轉換
             turn: RED,
             redCards: redCards,
             blackCards: blackCards,
@@ -609,7 +629,7 @@ function init(){
 }
 window.addEventListener('resize', ()=>{ if(!gameOver || true) updateUI(); });
 init();
-console.log('✅ 象棋卡牌對戰 · Firebase 聯機版已啟動');
+console.log('✅ 象棋卡牌對戰 · Firebase 聯機版已啟動（修正嵌套陣列）');
 </script>
 </body>
 </html>
